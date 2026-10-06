@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy: #0f172a;
+  --color-navy-2: #1e293b;
+  --color-brand: #059669;
+  --color-brand-dark: #047857;
+  --color-brand-soft: #ecfdf5;
+  --color-accent: #d97706;
+  --color-accent-soft: #fffbeb;
+  --color-danger: #dc2626;
+  --color-surface: #f8fafc;
+  --color-line: #e2e8f0;
+  --color-muted: #64748b;
+  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius-card: 14px;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+body {
+  background: var(--color-surface);
+  color: var(--color-navy);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Horizontal chip rows scroll on phones without a visible bar */
+.scroll-row {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.scroll-row::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

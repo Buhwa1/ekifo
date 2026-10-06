@@ -1,0 +1,42 @@
+{
+  "name": "findekifo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FindEkifo — find your space in Uganda. Hostels, arcades, rentals and flexi-stays.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:studio": "drizzle-kit studio",
+    "jobs:run": "tsx scripts/run-jobs.ts",
+    "test": "tsx scripts/test-db.ts && tsx --test lib/*.test.ts lib/*.test.mts"
+  },
+  "dependencies": {
+    "@ducanh2912/next-pwa": "^10.2.9",
+    "drizzle-orm": "^0.44.7",
+    "lucide-react": "^0.468.0",
+    "next": "15.5.27",
+    "pdf-lib": "^1.17.1",
+    "pg": "^8.23.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "server-only": "^0.0.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "dotenv": "^16.4.7",
+    "drizzle-kit": "^0.31.11",
+    "tailwindcss": "^4.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
