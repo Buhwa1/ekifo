@@ -16,10 +16,11 @@
     "test": "tsx scripts/test-db.ts && tsx --test lib/*.test.ts lib/*.test.mts"
   },
   "dependencies": {
-    "@ducanh2912/next-pwa": "^10.2.9",
-    "drizzle-orm": "^0.44.7",
+    "@ducanh2912/next-pwa": "^6.1.0",
+    "drizzle-orm": "^0.45.3",
+    "fast-glob": "^3.3.3",
     "lucide-react": "^0.468.0",
-    "next": "15.5.27",
+    "next": "^16.4.0",
     "pdf-lib": "^1.17.1",
     "pg": "^8.23.1",
     "react": "19.1.0",
@@ -34,7 +35,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "dotenv": "^16.4.7",
-    "drizzle-kit": "^0.31.11",
+    "drizzle-kit": "^0.18.1",
     "tailwindcss": "^4.1.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

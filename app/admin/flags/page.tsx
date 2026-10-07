@@ -42,13 +42,13 @@ export default async function FlagsPage() {
             <div className="mt-3 flex flex-wrap items-start gap-2">
               {f.holdId && holdStatus === "HELD" ? (
                 <>
-                  <ActionForm action={adminRefundHoldAction.bind(null, f.holdId)} confirm="Refund the tenant in full?"><SubmitButton size="sm" variant="danger">Refund tenant</SubmitButton></ActionForm>
-                  <ActionButton action={adminConfirmHoldAction.bind(null, f.holdId)} confirm="Release escrow to the landlord?">Release to landlord</ActionButton>
+                  <ActionForm action={adminRefundHoldAction.bind(null, f.holdId)} confirm={{ title: "Refund the tenant in full?", body: "The unit becomes free again.", confirmLabel: "Refund", danger: true }}><SubmitButton size="sm" variant="danger">Refund tenant</SubmitButton></ActionForm>
+                  <ActionButton action={adminConfirmHoldAction.bind(null, f.holdId)} confirm={{ title: "Release the deposit to the landlord?", confirmLabel: "Release" }}>Release to landlord</ActionButton>
                 </>
               ) : null}
-              {p && p.status === "LIVE" ? <ActionButton action={suspendPropertyAction.bind(null, p.id, true)} variant="danger" confirm="Hide this listing from search?">Suspend listing</ActionButton> : null}
+              {p && p.status === "LIVE" ? <ActionButton action={suspendPropertyAction.bind(null, p.id, true)} variant="danger" confirm={{ title: "Suspend this listing?", body: "It disappears from search until you restore it.", confirmLabel: "Suspend listing", danger: true }}>Suspend listing</ActionButton> : null}
               {p && p.status === "SUSPENDED" ? <ActionButton action={suspendPropertyAction.bind(null, p.id, false)}>Restore listing</ActionButton> : null}
-              {owner && !owner.suspendedAt ? <ActionButton action={suspendUserAction.bind(null, owner.id, true)} variant="danger" confirm="Suspend this landlord's account and sign them out?">Suspend owner</ActionButton> : null}
+              {owner && !owner.suspendedAt ? <ActionButton action={suspendUserAction.bind(null, owner.id, true)} variant="danger" confirm={{ title: "Suspend this landlord?", body: "They are signed out everywhere and can't sign back in.", confirmLabel: "Suspend account", danger: true }}>Suspend owner</ActionButton> : null}
               <ActionForm action={resolveFlagAction.bind(null, f.id, "RESOLVED")} className="flex gap-1">
                 <Input name="note" placeholder="Resolution note" className="h-9 w-48" />
                 <SubmitButton size="sm" variant="navy">Resolve</SubmitButton>
@@ -63,7 +63,7 @@ export default async function FlagsPage() {
         <h2 className="mb-3 text-lg font-bold">Audit log</h2>
         <div className="overflow-x-auto rounded-[var(--radius-card)] border border-line bg-white">
           <table className="w-full min-w-[600px] text-sm">
-            <thead className="bg-surface text-left text-xs uppercase tracking-wide text-muted"><tr><th className="p-3">When</th><th className="p-3">Who</th><th className="p-3">Action</th><th className="p-3">Entity</th></tr></thead>
+            <thead className="bg-surface text-left text-[13px] font-semibold text-muted"><tr><th className="p-3">When</th><th className="p-3">Who</th><th className="p-3">Action</th><th className="p-3">Entity</th></tr></thead>
             <tbody className="divide-y divide-line">
               {log.map(({ a, actor }) => (
                 <tr key={a.id}><td className="p-3 whitespace-nowrap">{dateTimeFmt(a.createdAt)}</td><td className="p-3">{actor ?? "system"}</td><td className="p-3 font-mono text-xs">{a.action}</td><td className="p-3 font-mono text-xs text-muted">{a.entity}:{a.entityId.slice(0, 8)}</td></tr>

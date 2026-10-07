@@ -15,13 +15,14 @@ const booking = await import("./booking");
 const ledger = await import("./ledger");
 const payouts = await import("./payouts");
 const { DomainError } = await import("./errors");
+const { kampalaAt, kampalaDate } = await import("./rules");
 
 let n = 0;
 const phone = () => `+25677${String(Date.now()).slice(-5)}${String(n++).padStart(2, "0")}`;
 
 async function fixture(units = 2) {
   const [owner] = await db.insert(S.users).values({ phone: phone(), name: "Owner", role: "LANDLORD", landlordStatus: "VERIFIED" }).returning();
-  const [prop] = await db.insert(S.properties).values({ ownerId: owner.id, name: "Test Hostel", category: "HOSTEL", district: "Kampala", suburb: "Kikoni", address: "Plot 1", status: "LIVE" }).returning();
+  const [prop] = await db.insert(S.properties).values({ ownerId: owner.id, name: "Test Hostel", type: "hostel", district: "Kampala", suburb: "Kikoni", address: "Plot 1", status: "LIVE" }).returning();
   const us = await db.insert(S.units).values(Array.from({ length: units }, (_, i) => ({ propertyId: prop.id, label: `R${i}`, priceUgx: 900_000, cycle: "PER_SEMESTER" as const, depositUgx: 100_000 }))).returning();
   const seekers = await db.insert(S.users).values(Array.from({ length: 5 }, () => ({ phone: phone(), name: "Seeker" }))).returning();
   return { owner, prop, units: us, seekers };
@@ -134,5 +135,83 @@ test("payouts can't exceed the balance, even when requested concurrently", async
 });
 
 test("ledger is balanced across every movement", async () => {
+  assert.equal(await ledger.unbalancedGroups(db), 0);
+});
+
+// ─── Time-slot bookings ──────────────────────────────────────────────────────
+async function turf() {
+  const [owner] = await db.insert(S.users).values({ phone: phone(), name: "Turf owner", role: "LANDLORD", landlordStatus: "VERIFIED" }).returning();
+  const [prop] = await db.insert(S.properties).values({ ownerId: owner.id, name: "Test Turf", type: "turf_sports", district: "Kampala", suburb: "Kyanja", address: "Plot 9", status: "LIVE", openFrom: 6, openTo: 23 }).returning();
+  const [pitch] = await db.insert(S.units).values({ propertyId: prop.id, label: "Pitch A", priceUgx: 80_000, cycle: "PER_HOUR", depositUgx: 80_000 }).returning();
+  const seekers = await db.insert(S.users).values(Array.from({ length: 4 }, () => ({ phone: phone(), name: "Player" }))).returning();
+  const day = kampalaDate(new Date(Date.now() + 3 * 86_400_000));
+  return { owner, prop, pitch, seekers, at: (h: number) => kampalaAt(day, h) };
+}
+
+test("slots: four people racing for 6–8pm on one pitch — exactly one wins", async () => {
+  const t = await turf();
+  const rs = await Promise.allSettled(t.seekers.map((s) =>
+    booking.createHold(asActor(s), { unitId: t.pitch.id, msisdn: "+256772000111", network: "MTN", startsAt: t.at(18), endsAt: t.at(20) })));
+  assert.equal(rs.filter((r) => r.status === "fulfilled").length, 1);
+  for (const r of rs) if (r.status === "rejected") assert.ok(r.reason instanceof DomainError, String(r.reason));
+});
+
+test("slots: overlapping refused, back-to-back allowed, priced per hour", async () => {
+  const t = await turf();
+  const a = await booking.createHold(asActor(t.seekers[0]), { unitId: t.pitch.id, msisdn: "+256772000111", network: "MTN", startsAt: t.at(18), endsAt: t.at(20) });
+  await assert.rejects(() => booking.createHold(asActor(t.seekers[1]), { unitId: t.pitch.id, msisdn: "+256772000222", network: "MTN", startsAt: t.at(19), endsAt: t.at(21) }), DomainError);
+  const b = await booking.createHold(asActor(t.seekers[1]), { unitId: t.pitch.id, msisdn: "+256772000222", network: "MTN", startsAt: t.at(20), endsAt: t.at(22) });
+  const [ha] = await db.select().from(S.holds).where(eq(S.holds.id, a.holdId));
+  const [hb] = await db.select().from(S.holds).where(eq(S.holds.id, b.holdId));
+  assert.equal(ha.amountUgx, 160_000);
+  assert.equal(hb.amountUgx, 160_000);
+});
+
+test("slots: a failed payment frees the window", async () => {
+  const t = await turf();
+  const a = await booking.createHold(asActor(t.seekers[0]), { unitId: t.pitch.id, msisdn: "+256772000111", network: "MTN", startsAt: t.at(9), endsAt: t.at(10) });
+  await booking.settlePayment(await txRefFor(a.holdId), { outcome: "FAILED", amountUgx: null, currency: null, providerRef: null });
+  const b = await booking.createHold(asActor(t.seekers[1]), { unitId: t.pitch.id, msisdn: "+256772000222", network: "MTN", startsAt: t.at(9), endsAt: t.at(10) });
+  assert.ok(b.holdId);
+});
+
+test("slots: paid booking leaves the unit bookable and is released to the venue after the slot", async () => {
+  const t = await turf();
+  const a = await booking.createHold(asActor(t.seekers[0]), { unitId: t.pitch.id, msisdn: "+256772000111", network: "MTN", startsAt: t.at(7), endsAt: t.at(8) });
+  await booking.settlePayment(await txRefFor(a.holdId), paid(80_000));
+  const [u] = await db.select().from(S.units).where(eq(S.units.id, t.pitch.id));
+  assert.equal(u.status, "VACANT", "a time booking must not lock the whole pitch");
+  await assert.rejects(() => booking.confirmMoveIn(asActor(t.seekers[0]), a.holdId), DomainError); // not started yet
+
+  // Pretend the slot happened two days ago, then run the sweep.
+  await db.update(S.holds).set({ heldUntil: new Date(Date.now() - 60_000) }).where(eq(S.holds.id, a.holdId));
+  await booking.sweepHolds();
+  const [h] = await db.select().from(S.holds).where(eq(S.holds.id, a.holdId));
+  assert.equal(h.status, "CONFIRMED");
+  assert.equal(await ledger.balance(db, "LANDLORD_PAYABLE", t.owner.id), 80_000 - 3_200);
+  assert.equal((await db.select().from(S.tenancies).where(eq(S.tenancies.holdId, a.holdId))).length, 0, "no tenancy for a one-off booking");
+});
+
+test("slots: an open dispute stops the automatic release", async () => {
+  const t = await turf();
+  const a = await booking.createHold(asActor(t.seekers[2]), { unitId: t.pitch.id, msisdn: "+256772000111", network: "MTN", startsAt: t.at(11), endsAt: t.at(12) });
+  await booking.settlePayment(await txRefFor(a.holdId), paid(80_000));
+  await booking.openDispute(asActor(t.seekers[2]), a.holdId, "The pitch was waterlogged and unusable.");
+  await db.update(S.holds).set({ heldUntil: new Date(Date.now() - 60_000) }).where(eq(S.holds.id, a.holdId));
+  await booking.sweepHolds();
+  const [h] = await db.select().from(S.holds).where(eq(S.holds.id, a.holdId));
+  assert.equal(h.status, "HELD");
+});
+
+test("slots: maintenance blocks new bookings", async () => {
+  const t = await turf();
+  await db.update(S.units).set({ status: "MAINTENANCE" }).where(eq(S.units.id, t.pitch.id));
+  await assert.rejects(
+    () => booking.createHold(asActor(t.seekers[3]), { unitId: t.pitch.id, msisdn: "+256772000111", network: "MTN", startsAt: t.at(15), endsAt: t.at(16) }),
+    /maintenance/,
+  );
+});
+
+test("ledger stays balanced after slot bookings", async () => {
   assert.equal(await ledger.unbalancedGroups(db), 0);
 });

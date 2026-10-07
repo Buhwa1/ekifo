@@ -1,9 +1,9 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { assertRole } from "@/lib/auth";
-import { createListing, listingInput, setUnitStatus, submitVerification, verificationInput, updateUnitPrice, addUnit, unitInput, type ListingInput } from "@/lib/listings";
+import { type OwnerSettableStatus, createListing, listingInput, setUnitStatus, submitVerification, verificationInput, updateUnitPrice, addUnit, unitInput, type ListingInput } from "@/lib/listings";
 import { updateVisit } from "@/lib/visits";
 import { releaseHold } from "@/lib/booking";
 import { requestPayout } from "@/lib/payouts";
@@ -26,22 +26,24 @@ export async function submitVerificationAction(fd: FormData): Promise<ActionResu
 
 export type WizardResult = { ok: true; id: string } | { ok: false; error: string; fieldErrors?: Record<string, string> };
 
-export async function createListingAction(input: ListingInput): Promise<WizardResult> {
+export async function createListingAction(input: ListingInput, onBehalfOf?: string): Promise<WizardResult> {
   const parsed = listingInput.safeParse(input);
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
     for (const i of parsed.error.issues) fieldErrors[i.path.join(".")] ??= i.message;
     return { ok: false, error: parsed.error.issues[0].message, fieldErrors };
   }
-  const res = await run(async () => createListing(await owner(), parsed.data));
+  const res = await run(async () => createListing(await owner(), parsed.data, onBehalfOf));
   if (!res.ok) return res;
   revalidatePath("/owner");
+  if (onBehalfOf) revalidateTag("inventory");
   return { ok: true, id: res.data! };
 }
 
-export async function setUnitStatusAction(unitId: string, status: "VACANT" | "OCCUPIED" | "UNLISTED"): Promise<ActionResult> {
+export async function setUnitStatusAction(unitId: string, status: OwnerSettableStatus): Promise<ActionResult> {
   return run(async () => {
     await setUnitStatus(await owner(), unitId, status);
+    revalidateTag("inventory");
     revalidatePath("/owner/units");
     revalidatePath("/owner");
   });
@@ -49,7 +51,8 @@ export async function setUnitStatusAction(unitId: string, status: "VACANT" | "OC
 
 export async function updatePriceAction(unitId: string, fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    await updateUnitPrice(await owner(), unitId, Number(fd.get("priceUgx")), Number(fd.get("depositUgx")));
+    const deposit = String(fd.get("depositUgx") ?? "").replace(/[, ]/g, "");
+    await updateUnitPrice(await owner(), unitId, Number(String(fd.get("priceUgx")).replace(/[, ]/g, "")), deposit ? Number(deposit) : null);
     revalidatePath("/owner/units");
   }, "Saved");
 }

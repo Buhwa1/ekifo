@@ -4,7 +4,7 @@ import withPWAInit from "@ducanh2912/next-pwa";
 
 const withPWA = withPWAInit({
   dest: "public",
-  disable: process.env.NODE_ENV === "development",
+  disable: process.env.NODE_ENV === "development" || process.env.DISABLE_PWA === "1",
   register: true,
   cacheOnFrontEndNav: true, // recently viewed spaces stay readable offline
   aggressiveFrontEndNavCaching: true,
@@ -48,6 +48,11 @@ const nextConfig: NextConfig = {
     ],
   },
   experimental: { serverActions: { bodySizeLimit: "2mb" } },
+  // Local upload stand-in: files added after the build aren't in the static /public snapshot.
+  // Rewrites run after the filesystem check, so files present at build time are still served directly.
+  async rewrites() {
+    return [{ source: "/uploads/:name", destination: "/api/uploads/local/:name" }];
+  },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

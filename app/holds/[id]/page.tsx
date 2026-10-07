@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { holds, units, properties, payments } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { formatUGX } from "@/lib/rules";
+import { fmtWindow } from "@/lib/booking";
 import { HoldStatus } from "@/components/hold-status";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +26,8 @@ export default async function HoldPage({ params }: { params: Promise<{ id: strin
         initial={row.h.status}
         amount={formatUGX(row.h.amountUgx)}
         msisdn={pay?.msisdn ?? ""}
-        place={`${row.u.label} · ${row.p.name}`}
+        place={`${row.u.label} at ${row.p.name}`}
+        window={row.h.startsAt && row.h.endsAt ? fmtWindow(row.h.startsAt, row.h.endsAt) : undefined}
         propertyId={row.p.id}
         deadline={row.h.paymentDeadline.toISOString()}
       />

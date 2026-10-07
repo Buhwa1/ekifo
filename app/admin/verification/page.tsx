@@ -3,7 +3,8 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { ExternalLink, AlertTriangle } from "lucide-react";
 import { db } from "@/db";
 import { landlordVerifications, users, properties, media, units, flags } from "@/db/schema";
-import { formatUGX, CATEGORY_LABEL, CYCLE_SHORT } from "@/lib/rules";
+import { formatUGX, CYCLE_SHORT } from "@/lib/rules";
+import { typeMap } from "@/lib/types";
 import { reviewVerificationAction, reviewListingAction, featurePropertyAction } from "@/app/actions/admin";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Empty, Input, PageHeader, StatusBadge, dateFmt, imgSrc } from "@/components/ui";
@@ -21,6 +22,7 @@ export default async function VerificationCenter() {
     db.select().from(properties).where(eq(properties.status, "LIVE")).orderBy(desc(properties.publishedAt)).limit(15),
   ]);
   const ids = pending.map((x) => x.p.id);
+  const types = await typeMap();
   const [pMedia, pUnits, pFlags] = ids.length
     ? await Promise.all([
         db.select().from(media).where(inArray(media.propertyId, ids)).orderBy(asc(media.position)),
@@ -75,7 +77,7 @@ export default async function VerificationCenter() {
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <Link href={`/spaces/${p.id}`} className="text-base font-bold hover:underline">{p.name}</Link>
-                  <p className="text-sm text-muted">{CATEGORY_LABEL[p.category]} · {p.address}, {p.suburb}, {p.district}{p.lat ? ` · GPS ${p.lat.toFixed(4)}, ${p.lng?.toFixed(4)}` : " · no GPS"}</p>
+                  <p className="text-sm text-muted">{types.get(p.type)?.name ?? p.type}. {p.address}, {p.suburb}, {p.district}. {p.lat ? `GPS ${p.lat.toFixed(4)}, ${p.lng?.toFixed(4)}` : "No GPS pin"}</p>
                   <p className="text-sm">Owner: {owner.name ?? owner.phone} <StatusBadge status={owner.landlordStatus} /></p>
                 </div>
                 <p className="text-sm text-muted">{dateFmt(p.createdAt)}</p>

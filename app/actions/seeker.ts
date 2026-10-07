@@ -36,7 +36,14 @@ export async function reserveAction(unitId: string, fd: FormData): Promise<Actio
     const network = fd.get("network") === "AIRTEL" ? "AIRTEL" : "MTN";
     if (fd.get("terms") !== "on") throw new DomainError("Please accept the escrow terms.");
     const moveIn = String(fd.get("moveIn") ?? "");
-    ({ holdId } = await createHold(user, { unitId, msisdn, network, moveInDate: moveIn ? kampala(moveIn, "09:00") : undefined }));
+    const start = String(fd.get("start") ?? "");
+    const end = String(fd.get("end") ?? "");
+    ({ holdId } = await createHold(user, {
+      unitId, msisdn, network,
+      moveInDate: moveIn ? kampala(moveIn, "09:00") : undefined,
+      startsAt: start ? new Date(start) : undefined,
+      endsAt: end ? new Date(end) : undefined,
+    }));
   });
   if (!res.ok) return res;
   redirect(`/holds/${holdId}`);
@@ -46,7 +53,7 @@ export async function confirmMoveInAction(holdId: string): Promise<ActionResult>
   return run(async () => {
     await confirmMoveIn(await me(), holdId);
     revalidatePath("/me");
-  }, "Move-in confirmed. Welcome home!");
+  }, "Confirmed. Thanks for letting us know.");
 }
 
 export async function cancelHoldAction(holdId: string): Promise<ActionResult> {

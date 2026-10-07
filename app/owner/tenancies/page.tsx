@@ -36,10 +36,10 @@ export default async function TenanciesPage() {
                 <p className="font-bold">{p.name} · {u.label}</p>
                 <p className="text-sm text-muted">{tenant.name ?? tenant.phone} · since {dateFmt(t.startDate)}{t.endedAt ? ` · ended ${dateFmt(t.endedAt)}` : ""}</p>
                 <p className="mt-2 tabular"><b>{formatUGX(cur)}</b> {CYCLE_LABEL[t.cycle]}</p>
-                {scheduled ? <p className="text-sm text-amber-700">Changes to {formatUGX(scheduled.newRentUgx)} on {dateFmt(scheduled.effectiveAt)}</p> : null}
+                {scheduled ? <p className="text-sm text-accent-ink">Changes to {formatUGX(scheduled.newRentUgx)} on {dateFmt(scheduled.effectiveAt)}</p> : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <a href={`/api/agreements/${t.id}`} target="_blank" className={buttonClass("outline", "sm")}><FileText className="size-4" /> Agreement</a>
-                  {!t.endedAt ? <ActionButton action={endTenancyAction.bind(null, t.id)} variant="ghost" confirm="Mark this tenancy as ended? The unit becomes vacant.">End tenancy</ActionButton> : null}
+                  {!t.endedAt ? <ActionButton action={endTenancyAction.bind(null, t.id)} variant="ghost" confirm={{ title: "End this tenancy?", body: "The unit will show as free to seekers again.", confirmLabel: "End tenancy", danger: true }}>End tenancy</ActionButton> : null}
                 </div>
                 {!t.endedAt && !scheduled ? (
                   <details className="mt-3">

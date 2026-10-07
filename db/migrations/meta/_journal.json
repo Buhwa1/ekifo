@@ -15,6 +15,27 @@
       "when": 1791327025359,
       "tag": "0001_lock_down_data_api",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791367758828,
+      "tag": "0002_types_slots_businesses",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791367797915,
+      "tag": "0003_seed_types_and_slot_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791367799545,
+      "tag": "0004_drop_category",
+      "breakpoints": true
     }
   ]
 }

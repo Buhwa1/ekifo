@@ -45,7 +45,7 @@ export function InstallBanner() {
 
   if (!open) return null;
   return (
-    <div role="dialog" aria-label="Install FindEkifo" className="fixed inset-x-0 bottom-0 z-40 p-3 sm:bottom-4 sm:left-auto sm:right-4 sm:w-96 sm:p-0">
+    <div role="dialog" aria-label="Install FindEkifo" className="fixed inset-x-0 bottom-[72px] z-40 p-3 md:bottom-4 md:left-auto md:right-4 md:w-96 md:p-0">
       <div className="flex items-start gap-3 rounded-2xl bg-navy p-4 text-white shadow-2xl ring-1 ring-white/10">
         <Logo className="size-10 shrink-0" />
         <div className="flex-1">

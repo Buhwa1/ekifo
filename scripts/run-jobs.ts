@@ -12,7 +12,7 @@ process.on("SIGINT", () => (stopping = true));
   while (!stopping) {
     try {
       const r = await runJobs();
-      if (r.outbox.sent || r.outbox.failed || r.holds.overdue || r.holds.lapsed) console.log(new Date().toISOString(), JSON.stringify(r));
+      if (r.outbox.sent || r.outbox.failed || r.holds.overdue || r.holds.lapsed || r.holds.released) console.log(new Date().toISOString(), JSON.stringify(r));
     } catch (e) {
       console.error(e);
     }

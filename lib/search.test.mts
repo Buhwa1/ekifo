@@ -13,7 +13,7 @@ after(() => pool.end());
 test("price and cycle filters match on units of the same property", async () => {
   const tag = `zz${Date.now()}`;
   const [o] = await db.insert(S.users).values({ phone: `+25670${String(Date.now()).slice(-7)}` }).returning();
-  const [p] = await db.insert(S.properties).values({ ownerId: o.id, name: `${tag} Place`, category: "FLEXI_STAY", district: "K", suburb: tag, address: "x", status: "LIVE" }).returning();
+  const [p] = await db.insert(S.properties).values({ ownerId: o.id, name: `${tag} Place`, type: "flexi_stay", district: "K", suburb: tag, address: "x", status: "LIVE" }).returning();
   await db.insert(S.units).values([
     { propertyId: p.id, label: "A", priceUgx: 40_000, cycle: "PER_DAY", depositUgx: 40_000 },
     { propertyId: p.id, label: "B", priceUgx: 900_000, cycle: "PER_MONTH", depositUgx: 100_000 },

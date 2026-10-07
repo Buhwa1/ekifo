@@ -4,14 +4,22 @@ import { z } from "zod";
 // ─── Validation schemas (shared with the wizard UI) ─────────────────────────
 export const ugx = z.coerce.number().int("Whole shillings only").min(1_000, "Too low").max(500_000_000, "Too high");
 
+export const CYCLES = ["PER_SEMESTER", "PER_MONTH", "PER_DAY", "PER_HOUR", "PER_EVENT_SLOT"] as const;
+const SLOT = new Set<string>(["PER_HOUR", "PER_EVENT_SLOT"]);
+
 export const unitInput = z.object({
   label: z.string().trim().min(1, "Give the unit a name").max(40),
   priceUgx: ugx,
-  cycle: z.enum(["PER_DAY", "PER_MONTH", "PER_SEMESTER"]),
-  depositUgx: ugx,
+  cycle: z.enum(CYCLES),
+  /** Long stays: deposit to reserve. Time-slot bookings are paid in full, so this mirrors the price. */
+  depositUgx: ugx.optional().nullable(),
   sizeSqft: z.coerce.number().int().positive().max(100_000).optional().nullable(),
   beds: z.coerce.number().int().min(0).max(20).optional().nullable(),
-}).refine((u) => u.depositUgx <= u.priceUgx * 3, { message: "Deposit can't exceed 3× the price", path: ["depositUgx"] });
+}).superRefine((u, ctx) => {
+  if (SLOT.has(u.cycle)) return;
+  if (u.depositUgx == null) ctx.addIssue({ code: "custom", message: "How much to reserve it?", path: ["depositUgx"] });
+  else if (u.depositUgx > u.priceUgx * 3) ctx.addIssue({ code: "custom", message: "Deposit can't exceed 3× the price", path: ["depositUgx"] });
+});
 
 export const mediaInput = z.object({
   url: z.string().url(),
@@ -22,7 +30,10 @@ export const mediaInput = z.object({
 
 export const listingInput = z.object({
   name: z.string().trim().min(3, "Building name is too short").max(80),
-  category: z.enum(["HOSTEL", "ARCADE", "RESIDENTIAL", "FLEXI_STAY"]),
+  type: z.string().trim().min(2, "Pick a type of space").max(32),
+  parentId: z.string().uuid().optional().nullable(),
+  openFrom: z.coerce.number().int().min(0).max(23).default(6),
+  openTo: z.coerce.number().int().min(1).max(24).default(23),
   district: z.string().trim().min(2).max(40),
   suburb: z.string().trim().min(2).max(40),
   address: z.string().trim().min(5, "Add a landmark or street").max(200),
@@ -36,6 +47,7 @@ export const listingInput = z.object({
   units: z.array(unitInput).min(1, "Add at least one unit").max(300),
   media: z.array(mediaInput).min(3, "Add at least 3 photos so seekers trust the listing").max(40),
 }).superRefine((l, ctx) => {
+  if (l.openTo <= l.openFrom) ctx.addIssue({ code: "custom", message: "Closing time must be after opening time", path: ["openTo"] });
   const seen = new Set<string>();
   l.units.forEach((u, i) => {
     const k = u.label.toLowerCase();

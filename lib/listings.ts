@@ -7,6 +7,8 @@ import { refreshPropertyStats } from "./inventory";
 import { enqueueSms } from "./notify";
 import { audit } from "./audit";
 import { hmac } from "./crypto";
+import { typeMap } from "./types";
+import { isSlotCycle, type Cycle } from "./rules";
 
 export { unitInput, mediaInput, listingInput, verificationInput, type ListingInput } from "./listing-schema";
 import { ugx, unitInput, listingInput, type ListingInput, type verificationInput } from "./listing-schema";
@@ -52,13 +54,54 @@ export async function reviewVerification(admin: { id: string }, verificationId: 
 }
 
 // ─── Listings ────────────────────────────────────────────────────────────────
-export async function createListing(owner: { id: string; landlordStatus: string }, input: ListingInput) {
-  if (owner.landlordStatus === "NONE" || owner.landlordStatus === "REJECTED")
+type Actor = { id: string; role: string; landlordStatus: string };
+
+/**
+ * Create a listing. Landlords list for themselves (goes to review). Admins can list on behalf of
+ * an onboarded client with onBehalfOf — those go live immediately, since the admin is the reviewer.
+ */
+export async function createListing(actor: Actor, input: ListingInput, onBehalfOf?: string) {
+  let ownerId = actor.id;
+  let ownerStatus = actor.landlordStatus;
+  if (onBehalfOf && onBehalfOf !== actor.id) {
+    if (actor.role !== "ADMIN") throw new DomainError("Only FindEkifo staff can list for someone else.");
+    const [client] = await db.select().from(users).where(eq(users.id, onBehalfOf));
+    if (!client) throw new DomainError("That client doesn't exist.");
+    ownerId = client.id;
+    ownerStatus = client.landlordStatus;
+  }
+  if (actor.role !== "ADMIN" && (ownerStatus === "NONE" || ownerStatus === "REJECTED"))
     throw new DomainError("Submit your ID verification before listing.");
+
+  const types = await typeMap();
+  const type = types.get(input.type);
+  if (!type || !type.active) throw new DomainError("Pick a type of space from the list.");
+  for (const [i, u] of input.units.entries())
+    if (!type.cycles.includes(u.cycle as Cycle))
+      throw new DomainError(`Unit ${i + 1}: a ${type.name.toLowerCase()} can't be charged ${u.cycle.toLowerCase().replace("per_", "per ").replace("_", " ")}.`);
+
+  if (input.parentId) {
+    if (!type.canBeChild) throw new DomainError(`A ${type.name.toLowerCase()} can't sit inside another listing.`);
+    const [parent] = await db.select().from(properties).where(eq(properties.id, input.parentId));
+    if (!parent || parent.ownerId !== ownerId) throw new DomainError("Pick one of your own buildings as the parent.");
+    if (parent.parentId) throw new DomainError("Spaces can only be one level deep.");
+    if (!types.get(parent.type)?.canHaveChildren) throw new DomainError(`${parent.name} can't contain other spaces.`);
+  }
+
+  const adminListing = actor.role === "ADMIN";
   return db.transaction(async (tx) => {
     const { units: unitRows, media: mediaRows, ...details } = input;
-    const [p] = await tx.insert(properties).values({ ...details, ownerId: owner.id, status: "PENDING_REVIEW" }).returning({ id: properties.id });
-    await tx.insert(units).values(unitRows.map((u) => ({ ...u, sizeSqft: u.sizeSqft ?? null, beds: u.beds ?? null, propertyId: p.id })));
+    const [p] = await tx.insert(properties).values({
+      ...details, parentId: details.parentId ?? null, ownerId,
+      status: adminListing ? "LIVE" : "PENDING_REVIEW",
+      publishedAt: adminListing ? new Date() : null,
+    }).returning({ id: properties.id });
+    await tx.insert(units).values(unitRows.map((u) => ({
+      ...u,
+      // Slot bookings are paid in full up front, so the "deposit" is the price itself.
+      depositUgx: isSlotCycle(u.cycle as Cycle) ? u.priceUgx : u.depositUgx!,
+      sizeSqft: u.sizeSqft ?? null, beds: u.beds ?? null, propertyId: p.id,
+    })));
     await tx.insert(media).values(mediaRows.map((m, i) => ({ ...m, publicId: m.publicId ?? null, checksum: m.checksum ?? null, propertyId: p.id, position: i })));
     await refreshPropertyStats(tx, p.id);
 
@@ -71,7 +114,7 @@ export async function createListing(owner: { id: string; landlordStatus: string 
       .innerJoin(properties, eq(properties.id, media.propertyId))
       .where(and(
         ne(media.propertyId, p.id),
-        ne(properties.ownerId, owner.id),
+        ne(properties.ownerId, ownerId),
         sums.length ? sql`(${inArray(media.checksum, sums)} or ${inArray(media.url, urls)})` : inArray(media.url, urls),
       ))
       .limit(5);
@@ -81,7 +124,7 @@ export async function createListing(owner: { id: string; landlordStatus: string 
         propertyId: p.id,
         reason: `Photos match ${dupes.length} image(s) on another landlord's listing (${[...new Set(dupes.map((d) => d.propertyId))].join(", ")}).`,
       });
-    await audit(tx, owner.id, "listing.create", "property", p.id, { units: unitRows.length, duplicates: dupes.length });
+    await audit(tx, actor.id, "listing.create", "property", p.id, { units: unitRows.length, duplicates: dupes.length, onBehalfOf: onBehalfOf ?? null });
     return p.id;
   });
 }
@@ -119,7 +162,9 @@ export async function setPropertySuspended(admin: { id: string }, propertyId: st
  * Owner toggles a unit. RESERVED is controlled by the escrow system only, and a unit with a live
  * reservation can't be flipped — that would strand a seeker's deposit.
  */
-export async function setUnitStatus(owner: { id: string; role: string }, unitId: string, status: "VACANT" | "OCCUPIED" | "UNLISTED") {
+export type OwnerSettableStatus = "VACANT" | "OCCUPIED" | "UNLISTED" | "MAINTENANCE" | "UNDER_CONSTRUCTION";
+
+export async function setUnitStatus(owner: { id: string; role: string }, unitId: string, status: OwnerSettableStatus) {
   await db.transaction(async (tx) => {
     const [row] = await tx
       .select({ unit: units, ownerId: properties.ownerId })
@@ -130,15 +175,18 @@ export async function setUnitStatus(owner: { id: string; role: string }, unitId:
     if (!row || (row.ownerId !== owner.id && owner.role !== "ADMIN")) throw new DomainError("Unit not found.");
     const live = await tx.select({ id: holds.id }).from(holds)
       .where(and(eq(holds.unitId, unitId), inArray(holds.status, ["PENDING_PAYMENT", "HELD"]))).limit(1);
-    if (live.length) throw new DomainError("This unit has an active reservation. Resolve it from your Lead Inbox first.");
+    if (live.length)
+      throw new DomainError(isSlotCycle(row.unit.cycle)
+        ? "This space has upcoming paid bookings. Cancel them from your Lead inbox first."
+        : "This unit has an active reservation. Resolve it from your Lead inbox first.");
     await tx.update(units).set({ status }).where(eq(units.id, unitId));
     await refreshPropertyStats(tx, row.unit.propertyId);
     await audit(tx, owner.id, "unit.status", "unit", unitId, { from: row.unit.status, to: status });
   });
 }
 
-export async function updateUnitPrice(owner: { id: string }, unitId: string, priceUgx: number, depositUgx: number) {
-  const parsed = z.object({ priceUgx: ugx, depositUgx: ugx }).safeParse({ priceUgx, depositUgx });
+export async function updateUnitPrice(owner: { id: string }, unitId: string, priceUgx: number, depositUgx: number | null) {
+  const parsed = z.object({ priceUgx: ugx, depositUgx: ugx }).safeParse({ priceUgx, depositUgx: depositUgx || priceUgx });
   if (!parsed.success) throw new DomainError(parsed.error.issues[0].message);
   await db.transaction(async (tx) => {
     const [row] = await tx.select({ unit: units, ownerId: properties.ownerId }).from(units)
@@ -146,7 +194,8 @@ export async function updateUnitPrice(owner: { id: string }, unitId: string, pri
     if (!row || row.ownerId !== owner.id) throw new DomainError("Unit not found.");
     if (row.unit.status === "OCCUPIED")
       throw new DomainError("Occupied unit — change rent through the tenancy so the legal cap and notice period apply.");
-    await tx.update(units).set(parsed.data).where(eq(units.id, unitId));
+    const slot = isSlotCycle(row.unit.cycle);
+    await tx.update(units).set({ priceUgx: parsed.data.priceUgx, depositUgx: slot ? parsed.data.priceUgx : parsed.data.depositUgx }).where(eq(units.id, unitId));
     await refreshPropertyStats(tx, row.unit.propertyId);
   });
 }
@@ -155,9 +204,11 @@ export async function addUnit(owner: { id: string }, propertyId: string, input: 
   await db.transaction(async (tx) => {
     const [p] = await tx.select().from(properties).where(and(eq(properties.id, propertyId), eq(properties.ownerId, owner.id)));
     if (!p) throw new DomainError("Listing not found.");
+    const type = (await typeMap()).get(p.type);
+    if (type && !type.cycles.includes(input.cycle as Cycle)) throw new DomainError(`A ${type.name.toLowerCase()} can't be charged that way.`);
     const clash = await tx.select({ id: units.id }).from(units).where(and(eq(units.propertyId, propertyId), sql`lower(${units.label}) = lower(${input.label})`));
     if (clash.length) throw new DomainError("A unit with that name already exists.");
-    await tx.insert(units).values({ ...input, sizeSqft: input.sizeSqft ?? null, beds: input.beds ?? null, propertyId });
+    await tx.insert(units).values({ ...input, depositUgx: isSlotCycle(input.cycle as Cycle) ? input.priceUgx : (input.depositUgx ?? input.priceUgx), sizeSqft: input.sizeSqft ?? null, beds: input.beds ?? null, propertyId });
     await refreshPropertyStats(tx, propertyId);
   });
 }

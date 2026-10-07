@@ -1,69 +1,122 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { CheckCircle2, Loader2, Smartphone, XCircle } from "lucide-react";
-import { buttonClass } from "./ui";
+import { Check, Loader2, Smartphone, X } from "lucide-react";
+import { buttonClass, cx } from "./ui";
 
 type Status = "PENDING_PAYMENT" | "HELD" | "CONFIRMED" | "REFUNDED" | "EXPIRED" | "CANCELLED";
 
-export function HoldStatus(p: { holdId: string; initial: Status; amount: string; msisdn: string; place: string; propertyId: string; deadline: string }) {
+/**
+ * "Approve on your phone" → "Reserved". Polls with backoff, pauses while the tab is hidden
+ * (the seeker is usually in their USSD/MoMo prompt), and checks again the moment they come back.
+ */
+export function HoldStatus(p: { holdId: string; initial: Status; amount: string; msisdn: string; place: string; propertyId: string; deadline: string; window?: string }) {
   const [status, setStatus] = useState<Status>(p.initial);
   const [left, setLeft] = useState(() => Math.max(0, Math.floor((new Date(p.deadline).getTime() - Date.now()) / 1000)));
+  const delay = useRef(2500);
 
   useEffect(() => {
     if (status !== "PENDING_PAYMENT") return;
-    let delay = 3000;
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     let alive = true;
+
     const poll = async () => {
+      if (document.hidden) return; // resumed by visibilitychange
       try {
         const r = await fetch(`/api/holds/${p.holdId}/status`, { cache: "no-store" });
         if (r.ok) {
           const { status: s } = (await r.json()) as { status: Status };
           if (!alive) return;
-          setStatus(s);
-          if (s !== "PENDING_PAYMENT") return;
+          if (s !== "PENDING_PAYMENT") {
+            setStatus(s);
+            if (s === "HELD" && "vibrate" in navigator) navigator.vibrate?.(60);
+            return;
+          }
         }
       } catch {} // offline blip — keep trying
-      delay = Math.min(delay * 1.3, 10_000);
-      timer = setTimeout(poll, delay);
+      delay.current = Math.min(delay.current * 1.25, 8000);
+      timer = setTimeout(poll, delay.current);
     };
-    timer = setTimeout(poll, delay);
+    const onVisible = () => {
+      if (!document.hidden) {
+        clearTimeout(timer);
+        delay.current = 2500;
+        poll();
+      }
+    };
+    timer = setTimeout(poll, delay.current);
+    document.addEventListener("visibilitychange", onVisible);
     const tick = setInterval(() => setLeft((l) => Math.max(0, l - 1)), 1000);
-    return () => { alive = false; clearTimeout(timer); clearInterval(tick); };
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      clearInterval(tick);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [status, p.holdId]);
 
-  if (status === "PENDING_PAYMENT")
-    return (
-      <div>
-        <div className="mx-auto grid size-20 place-items-center rounded-full bg-accent-soft"><Smartphone className="size-9 text-accent" /></div>
-        <h1 className="mt-5 text-2xl font-extrabold">Approve on your phone</h1>
-        <p className="mt-2 text-muted">Enter your Mobile Money PIN on <b className="text-navy">{p.msisdn}</b> to pay <b className="text-navy">{p.amount}</b> for {p.place}.</p>
-        <p className="mt-6 flex items-center justify-center gap-2 text-sm font-semibold text-muted"><Loader2 className="size-4 animate-spin" /> Waiting for confirmation{left ? ` · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : ""}</p>
-        <p className="mt-6 text-xs text-muted">No prompt? Dial *165# (MTN) or *185# (Airtel) and check pending approvals.</p>
-      </div>
-    );
-
-  if (status === "HELD" || status === "CONFIRMED")
-    return (
-      <div>
-        <CheckCircle2 className="mx-auto size-20 text-brand" />
-        <h1 className="mt-5 text-2xl font-extrabold">It's reserved for you</h1>
-        <p className="mt-2 text-muted">{p.place}. Your {p.amount} is held in escrow. When you get the keys, tap “I've moved in” so the landlord is paid.</p>
-        <div className="mt-6 flex justify-center gap-2">
-          <Link href="/me" className={buttonClass("primary")}>My reservations</Link>
-          <Link href={`/spaces/${p.propertyId}`} className={buttonClass("outline")}>View space</Link>
-        </div>
-      </div>
-    );
+  const steps = [
+    { label: "PIN prompt sent", done: true },
+    { label: "You approve it", done: status !== "PENDING_PAYMENT" && status !== "EXPIRED" && status !== "CANCELLED" },
+    { label: p.window ? "Time booked" : "Unit reserved", done: status === "HELD" || status === "CONFIRMED" },
+  ];
+  const failed = status === "EXPIRED" || status === "CANCELLED" || status === "REFUNDED";
 
   return (
-    <div>
-      <XCircle className="mx-auto size-20 text-danger" />
-      <h1 className="mt-5 text-2xl font-extrabold">{status === "REFUNDED" ? "Refunded" : "Payment didn't go through"}</h1>
-      <p className="mt-2 text-muted">{status === "REFUNDED" ? `${p.amount} is on its way back to ${p.msisdn}.` : "No money was taken. You can try again — the space may still be free."}</p>
-      <Link href={`/spaces/${p.propertyId}`} className={buttonClass("primary", "md", "mt-6")}>Back to the space</Link>
+    <div className="mx-auto max-w-sm text-center">
+      <div className={cx("mx-auto grid size-20 place-items-center rounded-full",
+        failed ? "bg-red-50 text-danger" : status === "PENDING_PAYMENT" ? "bg-accent-soft text-accent" : "bg-brand-soft text-brand")}>
+        {failed ? <X className="size-9" /> : status === "PENDING_PAYMENT" ? <Smartphone className="size-9" /> : <Check className="size-10" strokeWidth={2.5} />}
+      </div>
+
+      <h1 className="mt-5 text-[28px] font-bold" aria-live="polite">
+        {status === "PENDING_PAYMENT" ? "Check your phone" : failed ? (status === "REFUNDED" ? "Refunded" : "Payment didn't go through") : p.window ? "You're booked" : "It's yours for now"}
+      </h1>
+      <p className="mt-2 text-muted">
+        {status === "PENDING_PAYMENT" ? (
+          <>Enter your Mobile Money PIN on <b className="text-ink">{p.msisdn}</b> to pay <b className="text-ink">{p.amount}</b> for {p.place}{p.window ? `, ${p.window}` : ""}.</>
+        ) : failed ? (
+          status === "REFUNDED" ? `${p.amount} is on its way back to ${p.msisdn}.` : "No money was taken. The unit may still be free — you can try again."
+        ) : (
+          p.window
+            ? <>{p.place}, <b className="text-ink">{p.window}</b>. We've sent the details by SMS. Your {p.amount} goes to the venue only after your booking.</>
+            : <>{p.place} is held for you. Your {p.amount} stays with FindEkifo until you tap “I've moved in”.</>
+        )}
+      </p>
+
+      {!failed ? (
+        <ol className="mx-auto mt-7 max-w-xs space-y-3 text-left">
+          {steps.map((s, i) => {
+            const current = !s.done && (i === 0 || steps[i - 1].done);
+            return (
+              <li key={s.label} className="flex items-center gap-3">
+                <span className={cx("grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold",
+                  s.done ? "bg-brand text-ink" : current ? "bg-accent-soft text-accent ring-2 ring-accent/30" : "bg-slate-100 text-muted")}>
+                  {s.done ? <Check className="size-4" strokeWidth={3} /> : current ? <Loader2 className="size-4 animate-spin" /> : i + 1}
+                </span>
+                <span className={cx("text-sm font-semibold", !s.done && !current && "text-muted")}>{s.label}</span>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+
+      {status === "PENDING_PAYMENT" ? (
+        <div className="mt-8 rounded-[var(--radius-card)] bg-white p-4 text-left text-sm ring-1 ring-line">
+          <p className="font-semibold">No prompt yet?</p>
+          <p className="mt-1 text-muted">Dial <b className="text-ink">*165#</b> (MTN) or <b className="text-ink">*185#</b> (Airtel) and look under pending approvals.{left ? <> The request expires in <span className="font-semibold text-ink tabular">{Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</span>.</> : null}</p>
+        </div>
+      ) : (
+        <div className="mt-8 flex flex-col gap-2 sm:flex-row sm:justify-center">
+          {failed ? (
+            <Link href={`/spaces/${p.propertyId}#units`} className={buttonClass("primary", "lg")}>Try again</Link>
+          ) : (
+            <Link href="/me" className={buttonClass("primary", "lg")}>Go to my bookings</Link>
+          )}
+          <Link href={`/spaces/${p.propertyId}`} className={buttonClass("outline", "lg")}>View the place</Link>
+        </div>
+      )}
     </div>
   );
 }

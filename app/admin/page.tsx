@@ -52,8 +52,8 @@ function Queue({ href, label, n, danger }: { href: string; label: string; n: num
   return (
     <Link href={href}>
       <Card className="p-4 transition hover:ring-2 hover:ring-brand/30">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
-        <p className={`mt-1 text-3xl font-extrabold tabular ${n && danger ? "text-danger" : n ? "text-accent" : "text-navy"}`}>{n}</p>
+        <p className="text-[13px] font-medium text-muted">{label}</p>
+        <p className={`mt-1 font-display text-3xl font-bold tabular ${n && danger ? "text-danger" : n ? "text-accent-ink" : "text-ink"}`}>{n}</p>
       </Card>
     </Link>
   );

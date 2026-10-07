@@ -1,53 +1,141 @@
 @import "tailwindcss";
 
+/*
+  FindEkifo design tokens — vivid versions of the brand colours, chosen to push against each other.
+  navy     #0B1F7A  surfaces: header, hero, the vacancy board
+  green    #14E08A  actions and "free now"  (ink text on it: 10.4:1)
+  amber    #FFB31A  bookings, deposits, business spaces (ink text: 10.1:1)
+  sky      #38C6FF  leisure & events (ink text: 9.2:1)
+  ink      #0A1238  text
+  Each colour has a dark "-ink" shade for text on white (all ≥ 5.5:1) and a "-soft" tint for fills.
+*/
 @theme {
+  --color-ink: #0a1238;
+  --color-ink-2: #1e2a5c;
+  --color-ink-3: #3b4672;
   --color-navy: #0f172a;
-  --color-navy-2: #1e293b;
-  --color-brand: #059669;
-  --color-brand-dark: #047857;
-  --color-brand-soft: #ecfdf5;
-  --color-accent: #d97706;
-  --color-accent-soft: #fffbeb;
-  --color-danger: #dc2626;
-  --color-surface: #f8fafc;
-  --color-line: #e2e8f0;
-  --color-muted: #64748b;
-  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --radius-card: 14px;
+  --color-navy-2: #142ea8;
+  --color-navy-deep: #07124a;
+
+  --color-brand: #7ccf00;
+  --color-brand-dark: #0fc77a;
+  --color-brand-ink: #03784a;
+  --color-brand-soft: #e2fbf0;
+  --color-brand-glow: #14e08a;
+
+  --color-accent: #ffb31a;
+  --color-accent-dark: #f29f00;
+  --color-accent-ink: #8f4a00;
+  --color-accent-soft: #fff5dc;
+
+  --color-sky: #38c6ff;
+  --color-sky-ink: #0464a8;
+  --color-sky-soft: #e5f6ff;
+
+  --color-danger: #e11d48;
+  --color-surface: #f4f6fd;
+  --color-line: #dee3f2;
+  --color-line-strong: #c5cde6;
+  --color-muted: #56618a;
+
+  --font-sans: var(--font-text-face), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display-face), var(--font-text-face), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 18px;
+  --radius-control: 12px;
+  --shadow-lift: 0 1px 2px rgb(10 18 56 / 0.05), 0 12px 28px -14px rgb(11 31 122 / 0.28);
+  --shadow-sheet: 0 -8px 40px -12px rgb(10 18 56 / 0.4);
+
+  --animate-sheet-up: sheet-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-fade-in: fade-in 160ms ease-out;
+  --animate-shimmer: shimmer 1.4s linear infinite;
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes shimmer {
+  from { background-position: -400px 0; }
+  to { background-position: 400px 0; }
 }
 
 html {
   -webkit-text-size-adjust: 100%;
-  scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
 }
 body {
+  overflow-x: clip; /* full-bleed sections use 100vw; never let them cause sideways scroll */
   background: var(--color-surface);
-  color: var(--color-navy);
+  color: var(--color-ink);
   font-family: var(--font-sans);
-  font-feature-settings: "ss01", "cv11";
+  font-size: 15px;
+  line-height: 1.55;
+  font-feature-settings: "cv11", "ss01"; /* Inter: single-storey a, open digits */
+  text-rendering: optimizeLegibility;
 }
+
+h1, h2, h3, .font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+/* Big headlines use Roboto's width axis for a tighter, poster-like set. */
+.display-tight { font-stretch: 88%; letter-spacing: -0.035em; }
 
 :focus-visible {
   outline: 2px solid var(--color-brand);
   outline-offset: 2px;
+  border-radius: 6px;
 }
 
-.tabular {
-  font-variant-numeric: tabular-nums;
-}
+.tabular { font-variant-numeric: tabular-nums; }
 
 /* Horizontal chip rows scroll on phones without a visible bar */
-.scroll-row {
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-.scroll-row::-webkit-scrollbar {
-  display: none;
+.scroll-row { scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+.scroll-row::-webkit-scrollbar { display: none; }
+
+/* Skeleton placeholder */
+.skeleton {
+  background: linear-gradient(90deg, #e8ecf8 0px, #f4f6fd 120px, #e8ecf8 240px) #e8ecf8;
+  background-size: 800px 100%;
+  animation: var(--animate-shimmer);
+  border-radius: 10px;
 }
 
+/* Native <dialog> as a bottom sheet on phones, centred card on larger screens */
+dialog.sheet {
+  margin: auto auto 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 88dvh;
+  border: 0;
+  padding: 0;
+  border-radius: 22px 22px 0 0;
+  box-shadow: var(--shadow-sheet);
+  background: white;
+  color: var(--color-ink);
+}
+dialog.sheet[open] { animation: var(--animate-sheet-up); }
+dialog.sheet::backdrop { background: rgb(7 18 74 / 0.55); animation: var(--animate-fade-in); }
+@media (min-width: 640px) {
+  dialog.sheet { margin: auto; max-width: 480px; border-radius: 22px; }
+}
+
+/* Safe-area padding for the mobile bottom nav on notched phones */
+.pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 8px); }
+
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Fieldsets default to min-width: min-content, which stops scroll rows inside them from scrolling. */
+fieldset { min-width: 0; }

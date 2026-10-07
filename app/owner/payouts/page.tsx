@@ -25,13 +25,13 @@ export default async function PayoutsPage() {
   return (
     <div>
       <PageHeader title="Payouts" subtitle="Deposits land here once tenants confirm move-in, minus the platform fee." />
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label="Available to withdraw" value={formatUGX(wallet.available)} tone="brand" />
-        <Stat label="Withdrawals in progress" value={formatUGX(wallet.inFlight)} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="col-span-2 sm:col-span-1"><Stat label="Available to withdraw" value={formatUGX(wallet.available)} tone="brand" /></div>
+        <Stat label="On the way to you" value={formatUGX(wallet.inFlight)} />
         <Stat label="Total balance" value={formatUGX(wallet.earned)} />
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
         <Card className="h-fit p-5">
           <h2 className="mb-3 flex items-center gap-2 font-bold"><Wallet className="size-5" /> Request payout</h2>
           {user.landlordStatus !== "VERIFIED" ? (
@@ -54,7 +54,7 @@ export default async function PayoutsPage() {
             {history.length ? (
               <div className="overflow-x-auto rounded-[var(--radius-card)] border border-line bg-white">
                 <table className="w-full text-sm">
-                  <thead className="bg-surface text-left text-xs uppercase tracking-wide text-muted"><tr><th className="p-3">Date</th><th className="p-3">To</th><th className="p-3 text-right">Amount</th><th className="p-3">Status</th></tr></thead>
+                  <thead className="bg-surface text-left text-[13px] font-semibold text-muted"><tr><th className="p-3">Date</th><th className="p-3">To</th><th className="p-3 text-right">Amount</th><th className="p-3">Status</th></tr></thead>
                   <tbody className="divide-y divide-line">
                     {history.map((p) => (
                       <tr key={p.id}><td className="p-3">{dateFmt(p.createdAt)}</td><td className="p-3">{p.method} · {p.destination}</td><td className="tabular p-3 text-right font-semibold">{formatUGX(p.amountUgx)}</td><td className="p-3"><StatusBadge status={p.status} /></td></tr>
@@ -71,7 +71,7 @@ export default async function PayoutsPage() {
                 {entries.map((e) => (
                   <li key={e.id} className="flex items-center justify-between gap-3 p-3">
                     <span><span className="block font-medium">{e.memo}</span><span className="text-xs text-muted">{dateFmt(e.createdAt)}</span></span>
-                    <span className={`tabular font-bold ${e.amount > 0 ? "text-brand" : "text-navy"}`}>{e.amount > 0 ? "+" : "−"}{formatUGX(Math.abs(e.amount))}</span>
+                    <span className={`tabular font-bold ${e.amount > 0 ? "text-brand-ink" : "text-ink"}`}>{e.amount > 0 ? "+" : "−"}{formatUGX(Math.abs(e.amount))}</span>
                   </li>
                 ))}
               </ul>

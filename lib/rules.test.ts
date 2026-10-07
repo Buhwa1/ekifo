@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  checkSlot, kampalaAt, slotsFor,
   checkRentIncrease, commissionFor, normalizeUgPhone, detectNetwork, requiresWrittenAgreement,
 } from "./rules";
 
@@ -62,4 +63,31 @@ test("written agreement threshold uses monthly equivalent", () => {
   assert.equal(requiresWrittenAgreement(500_000, "PER_MONTH", 500_000), true);
   assert.equal(requiresWrittenAgreement(1_200_000, "PER_SEMESTER", 500_000), false); // ~300k/mo
   assert.equal(requiresWrittenAgreement(20_000, "PER_DAY", 500_000), true); // ~600k/mo
+});
+
+// ─── Time slots ──────────────────────────────────────────────────────────────
+const slotNow = new Date("2026-10-07T06:00:00Z"); // 09:00 Kampala
+const hourly = { cycle: "PER_HOUR" as const, priceUgx: 80_000, openFrom: 6, openTo: 23, now: slotNow };
+
+test("slot: hourly booking is priced by the hour", () => {
+  const r = checkSlot({ ...hourly, start: kampalaAt("2026-10-08", 18), end: kampalaAt("2026-10-08", 20) });
+  assert.deepEqual(r, { ok: true, amountUgx: 160_000, hours: 2 });
+});
+
+test("slot: outside opening hours, past, off-the-hour and overnight are refused", () => {
+  assert.equal(checkSlot({ ...hourly, start: kampalaAt("2026-10-08", 22), end: kampalaAt("2026-10-09", 0) }).ok, false);
+  assert.equal(checkSlot({ ...hourly, start: kampalaAt("2026-10-07", 9), end: kampalaAt("2026-10-07", 10) }).ok, false);
+  assert.equal(checkSlot({ ...hourly, start: new Date(kampalaAt("2026-10-08", 9).getTime() + 15 * 60_000), end: kampalaAt("2026-10-08", 11) }).ok, false);
+  assert.equal(checkSlot({ ...hourly, start: kampalaAt("2026-10-08", 5), end: kampalaAt("2026-10-08", 7) }).ok, false);
+});
+
+test("slot: event slots must match a block inside opening hours", () => {
+  const ev = { ...hourly, cycle: "PER_EVENT_SLOT" as const, priceUgx: 1_500_000 };
+  assert.deepEqual(checkSlot({ ...ev, start: kampalaAt("2026-10-10", 18), end: kampalaAt("2026-10-10", 23) }), { ok: true, amountUgx: 1_500_000, hours: 5 });
+  assert.equal(checkSlot({ ...ev, start: kampalaAt("2026-10-10", 18), end: kampalaAt("2026-10-10", 20) }).ok, false);
+  assert.deepEqual(slotsFor(10, 22).map((s) => s.key), ["afternoon"]);
+});
+
+test("slot: long-stay cycles can't be booked by time", () => {
+  assert.equal(checkSlot({ ...hourly, cycle: "PER_MONTH", start: kampalaAt("2026-10-08", 9), end: kampalaAt("2026-10-08", 10) }).ok, false);
 });

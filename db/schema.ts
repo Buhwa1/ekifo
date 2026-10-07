@@ -3,7 +3,7 @@
 import { sql, relations } from "drizzle-orm";
 import {
   pgTable, pgEnum, text, integer, boolean, timestamp, doublePrecision, jsonb, uuid,
-  index, uniqueIndex, primaryKey,
+  index, uniqueIndex, primaryKey, type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 const id = () => uuid("id").primaryKey().defaultRandom();
@@ -14,13 +14,24 @@ const updatedAt = () =>
 // ─── Enums ───────────────────────────────────────────────────────────────────
 export const roleEnum = pgEnum("role", ["SEEKER", "LANDLORD", "ADMIN"]);
 export const landlordStatusEnum = pgEnum("landlord_status", ["NONE", "PENDING", "VERIFIED", "REJECTED"]);
-export const categoryEnum = pgEnum("category", ["HOSTEL", "ARCADE", "RESIDENTIAL", "FLEXI_STAY"]);
 export const propertyStatusEnum = pgEnum("property_status", ["DRAFT", "PENDING_REVIEW", "LIVE", "REJECTED", "SUSPENDED"]);
 export const yakaEnum = pgEnum("yaka_setup", ["PRIVATE", "SHARED", "INCLUSIVE", "NONE"]);
 export const waterEnum = pgEnum("water_setup", ["NWSC", "GRAVITY_TANK", "BOTH", "NONE"]);
 export const mediaKindEnum = pgEnum("media_kind", ["PHOTO", "VIDEO", "TOUR_360", "FLOOR_PLAN"]);
-export const cycleEnum = pgEnum("price_cycle", ["PER_DAY", "PER_MONTH", "PER_SEMESTER"]);
-export const unitStatusEnum = pgEnum("unit_status", ["VACANT", "RESERVED", "OCCUPIED", "UNLISTED"]);
+export const cycleEnum = pgEnum("price_cycle", ["PER_DAY", "PER_MONTH", "PER_SEMESTER", "PER_HOUR", "PER_EVENT_SLOT"]);
+export const unitStatusEnum = pgEnum("unit_status", [
+  "VACANT", //             free to rent / book
+  "RESERVED", //           "Booked": deposit paid and in escrow (managed by the booking engine)
+  "OCCUPIED",
+  "UNLISTED", //           hidden by the owner
+  "MAINTENANCE", //        temporarily out of service
+  "UNDER_CONSTRUCTION", // shown as "coming soon"; not bookable
+]);
+/** Top-level grouping shown to seekers. Every property type belongs to exactly one. */
+export const propertyGroupEnum = pgEnum("property_group", ["STAY", "BUSINESS", "LEISURE"]);
+/** LEASE: reserve a unit for a long stay/tenancy. SLOT: book a unit for a time window (hourly or event slot). */
+export const bookingModeEnum = pgEnum("booking_mode", ["LEASE", "SLOT"]);
+export const businessStatusEnum = pgEnum("business_status", ["PENDING", "PUBLISHED", "HIDDEN"]);
 export const visitStatusEnum = pgEnum("visit_status", [
   "REQUESTED", "CONFIRMED", "RESCHEDULED", "DECLINED", "COMPLETED", "NO_SHOW", "CANCELLED",
 ]);
@@ -98,11 +109,39 @@ export const landlordVerifications = pgTable("landlord_verifications", {
 ]);
 
 // ─── Inventory ───────────────────────────────────────────────────────────────
+/**
+ * Property types live in a table so admins can add new ones (e.g. "co-working", "gym") without a
+ * deploy. Cycles are stored as text so a migration can seed rows in the same transaction that
+ * adds new price_cycle enum values.
+ */
+export const propertyTypes = pgTable("property_types", {
+  slug: text("slug").primaryKey(), // "hostel", "turf_sports"
+  name: text("name").notNull(), // "Turf & sports pitch"
+  plural: text("plural").notNull(), // "Turfs & sports pitches"
+  group: propertyGroupEnum("group").notNull(),
+  bookingMode: bookingModeEnum("booking_mode").notNull().default("LEASE"),
+  cycles: text("cycles").array().notNull(), // allowed price_cycle values, first = default
+  canHaveChildren: boolean("can_have_children").notNull().default(false), // a hotel/mall can contain a pool, rooftop…
+  canBeChild: boolean("can_be_child").notNull().default(false),
+  unitNoun: text("unit_noun").notNull().default("Unit"), // "Room", "Stall", "Pitch", "Package"
+  icon: text("icon").notNull().default("building"),
+  description: text("description").notNull().default(""),
+  sort: integer("sort").notNull().default(100),
+  active: boolean("active").notNull().default(true),
+  builtIn: boolean("built_in").notNull().default(false),
+  createdAt: createdAt(),
+});
+
 export const properties = pgTable("properties", {
   id: id(),
   ownerId: uuid("owner_id").notNull().references(() => users.id),
   name: text("name").notNull(),
-  category: categoryEnum("category").notNull(),
+  type: text("type").notNull().references(() => propertyTypes.slug, { onUpdate: "cascade" }),
+  /** Set when this space sits inside another listing — e.g. a rooftop lounge in a hotel. */
+  parentId: uuid("parent_id").references((): AnyPgColumn => properties.id, { onDelete: "set null" }),
+  /** Opening hours (Kampala, 0–24) for hourly/slot bookings. */
+  openFrom: integer("open_from").notNull().default(6),
+  openTo: integer("open_to").notNull().default(23),
   district: text("district").notNull(),
   suburb: text("suburb").notNull(),
   address: text("address").notNull(),
@@ -125,7 +164,8 @@ export const properties = pgTable("properties", {
   updatedAt: updatedAt(),
   publishedAt: timestamp("published_at", { withTimezone: true }),
 }, (t) => [
-  index("prop_search_idx").on(t.status, t.category, t.suburb),
+  index("prop_type_idx").on(t.status, t.type, t.suburb),
+  index("prop_parent_idx").on(t.parentId),
   index("prop_price_idx").on(t.status, t.minPriceUgx),
   index("prop_owner_idx").on(t.ownerId),
 ]);
@@ -189,13 +229,18 @@ export const holds = pgTable("holds", {
   paidAt: timestamp("paid_at", { withTimezone: true }),
   heldUntil: timestamp("held_until", { withTimezone: true }),
   moveInDate: timestamp("move_in_date", { withTimezone: true }),
+  /** Time-slot bookings only (hourly / event slot). Null for long-stay reservations. */
+  startsAt: timestamp("starts_at", { withTimezone: true }),
+  endsAt: timestamp("ends_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
-  // THE double-booking guard: at most one live hold per unit, enforced by Postgres itself.
+  // THE double-booking guard for long stays: at most one live hold per unit, enforced by Postgres.
+  // Time-slot bookings are guarded by the exclusion constraint "no_overlapping_slots" (migration 0003).
   uniqueIndex("one_active_hold_per_unit")
     .on(t.unitId)
-    .where(sql`status in ('PENDING_PAYMENT','HELD')`),
+    .where(sql`status in ('PENDING_PAYMENT','HELD') and starts_at is null`),
+  index("hold_slot_idx").on(t.unitId, t.startsAt),
   index("hold_seeker_idx").on(t.seekerId, t.createdAt),
   index("hold_deadline_idx").on(t.status, t.paymentDeadline),
   index("hold_held_until_idx").on(t.status, t.heldUntil),
@@ -310,6 +355,35 @@ export const savedSpaces = pgTable("saved_spaces", {
   createdAt: createdAt(),
 }, (t) => [primaryKey({ columns: [t.userId, t.propertyId] })]);
 
+// ─── Business hub ────────────────────────────────────────────────────────────
+/** A tenant's shop/business inside a mall or arcade — the tenant directory. */
+export const businesses = pgTable("businesses", {
+  id: id(),
+  slug: text("slug").notNull().unique(),
+  propertyId: uuid("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+  unitId: uuid("unit_id").references(() => units.id, { onDelete: "set null" }),
+  unitLabel: text("unit_label").notNull(), // "Room A2" — free text so tenants can match their signage
+  ownerId: uuid("owner_id").notNull().references(() => users.id),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  description: text("description").notNull().default(""),
+  phone: text("phone"),
+  whatsapp: text("whatsapp"),
+  instagram: text("instagram"),
+  facebook: text("facebook"),
+  tiktok: text("tiktok"),
+  website: text("website"),
+  photos: text("photos").array().notNull().default(sql`'{}'::text[]`), // 1–2 storefront photos
+  hours: text("hours"),
+  status: businessStatusEnum("status").notNull().default("PENDING"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index("biz_property_idx").on(t.propertyId, t.status),
+  index("biz_status_idx").on(t.status, t.category),
+  index("biz_owner_idx").on(t.ownerId),
+]);
+
 // ─── Plumbing ────────────────────────────────────────────────────────────────
 // Transactional outbox: SMS/WhatsApp messages are inserted in the same transaction as the state
 // change that caused them, then delivered with retries by lib/notify.ts#drainOutbox.
@@ -351,8 +425,16 @@ export const usersRelations = relations(users, ({ many }) => ({
   holds: many(holds),
   visits: many(visits),
 }));
+export const propertyTypesRelations = relations(propertyTypes, ({ many }) => ({
+  properties: many(properties),
+}));
+export const businessesRelations = relations(businesses, ({ one }) => ({
+  property: one(properties, { fields: [businesses.propertyId], references: [properties.id] }),
+  owner: one(users, { fields: [businesses.ownerId], references: [users.id] }),
+}));
 export const propertiesRelations = relations(properties, ({ one, many }) => ({
   owner: one(users, { fields: [properties.ownerId], references: [users.id] }),
+  propertyType: one(propertyTypes, { fields: [properties.type], references: [propertyTypes.slug] }),
   units: many(units),
   media: many(media),
   reviews: many(reviews),

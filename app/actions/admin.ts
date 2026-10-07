@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { flags, properties, users, sessions } from "@/db/schema";
@@ -9,6 +9,8 @@ import { reviewVerification, reviewListing, setPropertySuspended } from "@/lib/l
 import { reviewPayout, executePayout } from "@/lib/payouts";
 import { confirmMoveIn, releaseHold } from "@/lib/booking";
 import { audit } from "@/lib/audit";
+import { onboardClient, onboardInput } from "@/lib/clients";
+import { createType, updateType, setTypeActive, typeInput } from "@/lib/types";
 import { DomainError, run, type ActionResult } from "@/lib/errors";
 
 const admin = () => assertRole(["ADMIN"]);
@@ -25,7 +27,7 @@ export async function reviewListingAction(id: string, approve: boolean, fd: Form
   return run(async () => {
     await reviewListing(await admin(), id, approve, note(fd));
     revalidatePath("/admin/verification");
-    revalidatePath("/");
+    revalidateTag("inventory"); // vacancy board + suburb list
   });
 }
 
@@ -34,6 +36,7 @@ export async function suspendPropertyAction(id: string, suspend: boolean): Promi
     await setPropertySuspended(await admin(), id, suspend);
     revalidatePath("/admin/flags");
     revalidatePath(`/spaces/${id}`);
+    revalidateTag("inventory");
   });
 }
 
@@ -98,4 +101,48 @@ export async function adminRefundHoldAction(id: string, fd: FormData): Promise<A
     revalidatePath("/admin/finance");
     revalidatePath("/admin/flags");
   }, "Refund issued");
+}
+
+// ─── Clients & property types ────────────────────────────────────────────────
+export async function onboardClientAction(fd: FormData): Promise<ActionResult<{ id: string }>> {
+  return run(async () => {
+    const a = await admin();
+    const parsed = onboardInput.safeParse({ ...Object.fromEntries(fd), verifiedInPerson: fd.get("verifiedInPerson") === "on" });
+    if (!parsed.success) throw new DomainError(parsed.error.issues[0].message);
+    const r = await onboardClient(a, parsed.data);
+    revalidatePath("/admin/clients");
+    return { id: r.id };
+  }, "Client set up. They've been sent an SMS with how to sign in.");
+}
+
+function typeFromForm(fd: FormData) {
+  const parsed = typeInput.safeParse({
+    ...Object.fromEntries(fd),
+    cycles: fd.getAll("cycles"),
+    canHaveChildren: fd.get("canHaveChildren") === "on",
+    canBeChild: fd.get("canBeChild") === "on",
+  });
+  if (!parsed.success) throw new DomainError(parsed.error.issues[0].message);
+  return parsed.data;
+}
+
+export async function createTypeAction(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    await createType(await admin(), typeFromForm(fd));
+    revalidatePath("/admin/types");
+  }, "Type added. Owners can pick it straight away.");
+}
+
+export async function updateTypeAction(slug: string, fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    await updateType(await admin(), slug, typeFromForm(fd));
+    revalidatePath("/admin/types");
+  }, "Saved");
+}
+
+export async function setTypeActiveAction(slug: string, active: boolean): Promise<ActionResult> {
+  return run(async () => {
+    await setTypeActive(await admin(), slug, active);
+    revalidatePath("/admin/types");
+  }, active ? "Type enabled" : "Type hidden from new listings");
 }

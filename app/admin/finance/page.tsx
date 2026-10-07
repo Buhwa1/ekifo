@@ -42,7 +42,7 @@ export default async function FinancePage() {
         {queue.length ? queue.map(({ p, u }, i) => (
           <Card key={p.id} className="mb-3 flex flex-wrap items-center justify-between gap-3 p-4">
             <div>
-              <p className="font-bold">{formatUGX(p.amountUgx)} → {p.method} {p.destination}</p>
+              <p className="font-bold">{formatUGX(p.amountUgx)} to {p.method} {p.destination}</p>
               <p className="text-sm text-muted">{u.name ?? u.phone} · requested {dateFmt(p.createdAt)} · ledger balance {formatUGX(balances[i].earned)}</p>
               {p.note ? <p className="text-xs text-muted">{p.note}</p> : null}
             </div>
@@ -57,7 +57,7 @@ export default async function FinancePage() {
                   </ActionForm>
                 </>
               ) : p.status === "APPROVED" ? (
-                <ActionForm action={payoutExecuteAction.bind(null, p.id)} className="flex gap-1" confirm={`Send ${formatUGX(p.amountUgx)} to ${p.destination}?`}>
+                <ActionForm action={payoutExecuteAction.bind(null, p.id)} className="flex gap-1" confirm={{ title: `Send ${formatUGX(p.amountUgx)}?`, body: `To ${p.method} ${p.destination}. This moves real money.`, confirmLabel: "Send money" }}>
                   {p.method === "BANK" ? <Input name="reference" placeholder="Bank ref" className="h-9 w-32" required /> : null}
                   <SubmitButton size="sm" variant="navy">{p.method === "BANK" ? "Mark sent" : "Send now"}</SubmitButton>
                 </ActionForm>
@@ -72,18 +72,18 @@ export default async function FinancePage() {
         {active.length ? (
           <div className="overflow-x-auto rounded-[var(--radius-card)] border border-line bg-white">
             <table className="w-full min-w-[720px] text-sm">
-              <thead className="bg-surface text-left text-xs uppercase tracking-wide text-muted"><tr><th className="p-3">Space</th><th className="p-3">Tenant</th><th className="p-3 text-right">Amount</th><th className="p-3">Hold ends</th><th className="p-3">Action</th></tr></thead>
+              <thead className="bg-surface text-left text-[13px] font-semibold text-muted"><tr><th className="p-3">Space</th><th className="p-3">Tenant</th><th className="p-3 text-right">Amount</th><th className="p-3">Hold ends</th><th className="p-3">Action</th></tr></thead>
               <tbody className="divide-y divide-line">
                 {active.map(({ h, u, p, s }) => (
-                  <tr key={h.id} className={h.heldUntil && h.heldUntil < new Date() ? "bg-amber-50" : ""}>
+                  <tr key={h.id} className={h.heldUntil && h.heldUntil < new Date() ? "bg-accent-soft" : ""}>
                     <td className="p-3">{p.name} · {u.label}</td>
                     <td className="p-3">{s.name ?? ""} {s.phone}</td>
                     <td className="tabular p-3 text-right font-semibold">{formatUGX(h.amountUgx)}</td>
                     <td className="p-3">{h.heldUntil ? dateTimeFmt(h.heldUntil) : "—"}</td>
                     <td className="p-3">
                       <div className="flex gap-1">
-                        <ActionButton action={adminConfirmHoldAction.bind(null, h.id)} variant="outline" confirm="Release escrow to the landlord?">Release</ActionButton>
-                        <ActionButton action={adminRefundHoldAction.bind(null, h.id)} variant="danger" confirm="Refund the tenant in full?">Refund</ActionButton>
+                        <ActionButton action={adminConfirmHoldAction.bind(null, h.id)} variant="outline" confirm={{ title: "Release the deposit to the landlord?", body: "Use this when the tenant has moved in but hasn't confirmed.", confirmLabel: "Release" }}>Release</ActionButton>
+                        <ActionButton action={adminRefundHoldAction.bind(null, h.id)} variant="danger" confirm={{ title: "Refund the tenant in full?", body: "The unit becomes free again.", confirmLabel: "Refund", danger: true }}>Refund</ActionButton>
                       </div>
                     </td>
                   </tr>
@@ -98,7 +98,7 @@ export default async function FinancePage() {
         <h2 className="mb-3 text-lg font-bold">Recent Mobile Money collections</h2>
         <div className="overflow-x-auto rounded-[var(--radius-card)] border border-line bg-white">
           <table className="w-full min-w-[640px] text-sm">
-            <thead className="bg-surface text-left text-xs uppercase tracking-wide text-muted"><tr><th className="p-3">When</th><th className="p-3">Reference</th><th className="p-3">From</th><th className="p-3 text-right">Amount</th><th className="p-3">Status</th></tr></thead>
+            <thead className="bg-surface text-left text-[13px] font-semibold text-muted"><tr><th className="p-3">When</th><th className="p-3">Reference</th><th className="p-3">From</th><th className="p-3 text-right">Amount</th><th className="p-3">Status</th></tr></thead>
             <tbody className="divide-y divide-line">
               {recentPayments.map((x) => (
                 <tr key={x.id}><td className="p-3">{dateTimeFmt(x.createdAt)}</td><td className="p-3 font-mono text-xs">{x.txRef}</td><td className="p-3">{x.network} {x.msisdn}</td><td className="tabular p-3 text-right">{formatUGX(x.amountUgx)}</td><td className="p-3"><StatusBadge status={x.status} /></td></tr>

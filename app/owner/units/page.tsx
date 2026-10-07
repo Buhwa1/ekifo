@@ -1,81 +1,109 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { Plus } from "lucide-react";
 import { db } from "@/db";
 import { properties, units } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
-import { formatUGX, CYCLE_SHORT } from "@/lib/rules";
-import { setUnitStatusAction, updatePriceAction, addUnitAction } from "@/app/actions/owner";
-import { ActionButton, ActionForm, SubmitButton } from "@/components/action-form";
-import { Card, Empty, Field, Input, PageHeader, Select, StatusBadge, cx } from "@/components/ui";
+import { CYCLE_SHORT } from "@/lib/rules";
+import { updatePriceAction, addUnitAction } from "@/app/actions/owner";
+import { ActionForm, SubmitButton } from "@/components/action-form";
+import { UnitStatusSelect } from "@/components/unit-status-select";
+import { typeMap } from "@/lib/types";
+import { isSlotCycle, CYCLE_LABEL, type Cycle } from "@/lib/rules";
+import { Empty, Field, Input, Meter, Select, StatusBadge, cx } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Units" };
 
-const RING = { VACANT: "ring-emerald-300 bg-emerald-50/40", RESERVED: "ring-amber-300 bg-amber-50/50", OCCUPIED: "ring-red-200 bg-red-50/40", UNLISTED: "ring-line bg-slate-50" } as const;
+const STRIPE = {
+  VACANT: "before:bg-brand", RESERVED: "before:bg-accent", OCCUPIED: "before:bg-danger", UNLISTED: "before:bg-slate-300",
+  MAINTENANCE: "before:bg-accent-dark", UNDER_CONSTRUCTION: "before:bg-sky",
+} as const;
+const ugx = new Intl.NumberFormat("en-UG", { maximumFractionDigits: 0 });
 
 export default async function UnitsPage() {
   const user = await requireRole(["LANDLORD", "ADMIN"], "/owner/units");
-  const props = await db.select().from(properties).where(eq(properties.ownerId, user.id)).orderBy(asc(properties.name));
-  const all = props.length ? await db.select().from(units).where(inArray(units.propertyId, props.map((p) => p.id))).orderBy(asc(units.label)) : [];
+  const [props, types] = await Promise.all([db.select().from(properties).where(eq(properties.ownerId, user.id)).orderBy(asc(properties.name)), typeMap()]);
+  const all = props.length
+    ? await db.select().from(units).where(inArray(units.propertyId, props.map((p) => p.id))).orderBy(sql`length(${units.label})`, asc(units.label))
+    : [];
 
   return (
     <div>
-      <PageHeader title="Unit status grid" subtitle="Tap to switch a unit between Vacant, Occupied and Hidden. Reserved units are managed by escrow." />
-      <div className="mb-5 flex flex-wrap gap-3 text-xs font-semibold">
-        <span className="flex items-center gap-1.5"><i className="size-3 rounded-full bg-emerald-500" /> Vacant</span>
-        <span className="flex items-center gap-1.5"><i className="size-3 rounded-full bg-amber-500" /> Reserved (deposit paid)</span>
-        <span className="flex items-center gap-1.5"><i className="size-3 rounded-full bg-red-500" /> Occupied</span>
-        <span className="flex items-center gap-1.5"><i className="size-3 rounded-full bg-slate-400" /> Hidden</span>
+      <div className="mb-6">
+        <h1 className="text-[30px] font-bold">Units</h1>
+        <p className="mt-1 max-w-2xl text-muted">Keep this up to date so people only see what's really available. Booked units have money in escrow and change by themselves.</p>
       </div>
-      {!props.length ? <Empty title="No properties yet" /> : null}
-      {props.map((p) => {
-        const list = all.filter((u) => u.propertyId === p.id);
-        return (
-          <section key={p.id} className="mb-8">
-            <h2 className="mb-3 flex items-center gap-2 font-bold">{p.name} <StatusBadge status={p.status} /></h2>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-              {list.map((u) => (
-                <Card key={u.id} className={cx("p-3 ring-2 ring-inset", RING[u.status])}>
-                  <div className="flex items-start justify-between gap-1">
-                    <p className="font-bold">{u.label}</p>
-                    <StatusBadge status={u.status} />
-                  </div>
-                  <p className="tabular text-sm text-muted">{formatUGX(u.priceUgx)}{CYCLE_SHORT[u.cycle]}</p>
-                  {u.status !== "RESERVED" ? (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {u.status !== "VACANT" ? <ActionButton action={setUnitStatusAction.bind(null, u.id, "VACANT")} size="sm" variant="outline">Vacant</ActionButton> : null}
-                      {u.status !== "OCCUPIED" ? <ActionButton action={setUnitStatusAction.bind(null, u.id, "OCCUPIED")} size="sm" variant="outline">Occupied</ActionButton> : null}
-                      {u.status !== "UNLISTED" ? <ActionButton action={setUnitStatusAction.bind(null, u.id, "UNLISTED")} size="sm" variant="ghost">Hide</ActionButton> : null}
+
+      {!props.length ? <Empty title="No spaces yet">Add a space first, then manage its units here.</Empty> : null}
+
+      <div className="space-y-10">
+        {props.map((p) => {
+          const list = all.filter((u) => u.propertyId === p.id);
+          const type = types.get(p.type);
+          const listed = list.filter((u) => u.status !== "UNLISTED");
+          const busy = listed.filter((u) => u.status === "OCCUPIED" || u.status === "RESERVED").length;
+          return (
+            <section key={p.id}>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="flex flex-wrap items-center gap-2 text-lg font-bold">{p.name} <span className="text-sm font-medium text-muted">{type?.name}</span> {p.status !== "LIVE" ? <StatusBadge status={p.status} /> : null}</h2>
+                <div className="flex w-full items-center gap-3 text-sm text-muted sm:w-auto">
+                  <Meter value={busy} max={listed.length} label={`${p.name} occupancy`} className="w-full sm:w-28" />
+                  <span className="shrink-0 whitespace-nowrap tabular">{listed.length - busy} free of {listed.length}</span>
+                </div>
+              </div>
+
+              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {list.map((u) => (
+                  <li key={u.id} data-status={u.status}
+                    className={cx("relative overflow-hidden rounded-[14px] bg-white p-3.5 pl-5 ring-1 ring-line before:absolute before:inset-y-0 before:left-0 before:w-1.5", STRIPE[u.status])}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">{u.label}</p>
+                        <p className="text-sm text-muted tabular">UGX {ugx.format(u.priceUgx)}{CYCLE_SHORT[u.cycle]}</p>
+                      </div>
+                      {u.status === "RESERVED" ? <StatusBadge status="RESERVED" /> : null}
                     </div>
-                  ) : <p className="mt-2 text-xs text-amber-800">Deposit in escrow — see Lead inbox.</p>}
-                  {u.status !== "OCCUPIED" ? (
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-xs font-semibold text-muted">Edit price</summary>
-                      <ActionForm action={updatePriceAction.bind(null, u.id)} className="mt-2 space-y-2">
-                        <Input name="priceUgx" inputMode="numeric" defaultValue={u.priceUgx} aria-label="Price" />
-                        <Input name="depositUgx" inputMode="numeric" defaultValue={u.depositUgx} aria-label="Deposit" />
-                        <SubmitButton size="sm" variant="navy">Save</SubmitButton>
-                      </ActionForm>
-                    </details>
-                  ) : null}
-                </Card>
-              ))}
-              <details className="rounded-[var(--radius-card)] border-2 border-dashed border-line bg-white p-3">
-                <summary className="flex cursor-pointer list-none items-center gap-1 font-semibold text-muted"><Plus className="size-4" /> Add unit</summary>
-                <ActionForm action={addUnitAction.bind(null, p.id)} className="mt-2 space-y-2" resetOnSuccess>
-                  <Field label="Name"><Input name="label" required /></Field>
-                  <Field label="Price"><Input name="priceUgx" inputMode="numeric" required /></Field>
-                  <Field label="Deposit"><Input name="depositUgx" inputMode="numeric" required /></Field>
-                  <Select name="cycle" defaultValue={list[0]?.cycle ?? "PER_MONTH"} aria-label="Cycle">
-                    <option value="PER_SEMESTER">Per semester</option><option value="PER_MONTH">Per month</option><option value="PER_DAY">Per day</option>
-                  </Select>
-                  <SubmitButton size="sm">Add</SubmitButton>
-                </ActionForm>
-              </details>
-            </div>
-          </section>
-        );
-      })}
+
+                    {u.status === "RESERVED" ? (
+                      <p className="mt-3 text-[13px] text-accent-ink">Booked: a tenant has paid a deposit. Manage it in the Lead inbox.</p>
+                    ) : (
+                      <div className="mt-3"><UnitStatusSelect unitId={u.id} status={u.status} label={u.label} /></div>
+                    )}
+
+                    {u.status !== "OCCUPIED" && u.status !== "RESERVED" ? (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs font-semibold text-muted hover:text-ink">Change price</summary>
+                        <ActionForm action={updatePriceAction.bind(null, u.id)} className="mt-2 grid grid-cols-2 gap-2">
+                          <Field label="Price"><Input name="priceUgx" inputMode="numeric" defaultValue={u.priceUgx} className="h-9" /></Field>
+                          {isSlotCycle(u.cycle) ? null : <Field label="Deposit"><Input name="depositUgx" inputMode="numeric" defaultValue={u.depositUgx} className="h-9" /></Field>}
+                          <div className="col-span-2"><SubmitButton size="sm" variant="navy">Save price</SubmitButton></div>
+                        </ActionForm>
+                      </details>
+                    ) : null}
+                  </li>
+                ))}
+
+                <li>
+                  <details className="h-full rounded-[14px] border-2 border-dashed border-line-strong bg-white/60 p-3.5">
+                    <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-semibold text-muted hover:text-ink"><Plus className="size-4" aria-hidden /> Add a {(type?.unitNoun ?? "unit").toLowerCase()}</summary>
+                    <ActionForm action={addUnitAction.bind(null, p.id)} className="mt-3 grid grid-cols-2 gap-2" resetOnSuccess>
+                      <Field label="Name" className="col-span-2"><Input name="label" required placeholder={`${type?.unitNoun ?? "Room"} ${list.length + 1}`} /></Field>
+                      <Field label="Price (UGX)"><Input name="priceUgx" inputMode="numeric" required /></Field>
+                      {type?.bookingMode === "SLOT" ? null : <Field label="Deposit (UGX)"><Input name="depositUgx" inputMode="numeric" required /></Field>}
+                      <Field label="Charged" className="col-span-2">
+                        <Select name="cycle" defaultValue={list[0]?.cycle ?? type?.cycles[0]}>
+                          {(type?.cycles ?? (["PER_MONTH"] as const)).map((c) => <option key={c} value={c}>{CYCLE_LABEL[c as Cycle].replace(/^per/, "Per")}</option>)}
+                        </Select>
+                      </Field>
+                      <div className="col-span-2"><SubmitButton size="sm">Add {(type?.unitNoun ?? "unit").toLowerCase()}</SubmitButton></div>
+                    </ActionForm>
+                  </details>
+                </li>
+              </ul>
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }
